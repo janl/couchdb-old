@@ -399,6 +399,7 @@ db_doc_req(#httpd{method='GET'}=Req, Db, DocId) ->
             [] -> [{"Etag", DiskEtag}]; % output etag only when we have no meta
             _ -> []
             end,
+            couch_stats_collector:increment({httpd, document_reads}),
             send_json(Req, 200, Headers, couch_doc:to_json_obj(Doc, Options))
         end;
     _ ->
@@ -422,6 +423,7 @@ db_doc_req(#httpd{method='GET'}=Req, Db, DocId) ->
             end,
             "", Results),
         send_chunk(Resp, "]"),
+        couch_stats_collector:increment({httpd, document_reads}),
         end_json_response(Resp)
     end;
 
