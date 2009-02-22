@@ -13,10 +13,6 @@
 -module(couch_stats_aggregator).
 -include("couch_stats.hrl").
 
--ifdef(TEST).
-  -include_lib("eunit/include/eunit.hrl").
--endif.
-
 -behaviour(gen_server).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
