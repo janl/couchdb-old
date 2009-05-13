@@ -25,6 +25,7 @@ function loadTest(file) {
   loadScript("script/test/"+file);
 };
 
+loadTest("view_filter.js");
 loadTest("basics.js");
 loadTest("batch_save.js");
 loadTest("delayed_commits.js");

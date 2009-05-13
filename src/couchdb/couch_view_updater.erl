@@ -90,6 +90,22 @@ purge_index(#group{db=Db, views=Views, id_btree=IdBtree}=Group) ->
             views=Views2,
             purge_seq=couch_db:get_purge_seq(Db)}.
 
+% [{<<"type">>,<<"foo">>}]},{[{<<"type">>,<<"bar">>}]
+
+filter_match(Filter, #doc{body=JsonDoc}) ->
+    {FieldList} = JsonDoc,
+    case Filter of
+        undefined -> undefined;
+        FilterList ->
+            lists:foldl(fun({[{Key, Value}]}, Acc) -> 
+                case proplists:get_value(Key, FieldList) of
+                    undefined -> Acc;
+                    Value -> [match | Acc];
+                    _ -> Acc
+                end
+            end, [], FilterList)
+        end.
+
 process_doc(Db, DocInfo, {Docs, #group{sig=Sig,name=GroupId,design_options=DesignOptions}=Group, ViewKVs,
         DocIdViewIdKeys}) ->
     % This fun computes once for each document
@@ -97,6 +113,9 @@ process_doc(Db, DocInfo, {Docs, #group{sig=Sig,name=GroupId,design_options=Desig
     #doc_info{id=DocId, revs=[#rev_info{deleted=Deleted}|_]} = DocInfo,
     IncludeDesign = proplists:get_value(<<"include_design">>, 
         DesignOptions, false),
+    
+    Filter = proplists:get_value(<<"filter">>, DesignOptions),
+
     case {IncludeDesign, DocId} of
     {_, GroupId} ->
         % uh oh. this is the design doc with our definitions. See if
@@ -127,7 +146,10 @@ process_doc(Db, DocInfo, {Docs, #group{sig=Sig,name=GroupId,design_options=Desig
         true ->
             {ok, Doc} = couch_db:open_doc_int(Db, DocInfo, 
                 [conflicts, deleted_conflicts]),
-            {[Doc | Docs], DocIdViewIdKeys}
+            case filter_match(Filter, Doc) of
+                [] -> {Docs, DocIdViewIdKeys};
+                _ -> {[Doc | Docs], DocIdViewIdKeys}
+            end
         end,
         
         case couch_util:should_flush() of
