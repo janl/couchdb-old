@@ -71,3 +71,4 @@ test/etap/temp.*
 # for make cover
 
 cover/*
+qs.php.log

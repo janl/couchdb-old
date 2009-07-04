@@ -15,7 +15,11 @@
 # spec test/query_server_spec.rb -f specdoc --color
 
 COUCH_ROOT = "#{File.dirname(__FILE__)}/.." unless defined?(COUCH_ROOT)
-LANGUAGE = "js"
+if defined?(ENV["LANGUAGE"])
+  LANGUAGE = ENV["LANGUAGE"]
+else
+  LANGUAGE = "js"
+end
 
 
 require 'open3'
@@ -25,7 +29,7 @@ require 'json'
 
 class OSProcessRunner
   def self.run
-    trace = false
+    trace = true
     puts "launching #{run_command}" if trace
     if block_given?
       Open3.popen3(run_command) do |jsin, jsout, jserr|
@@ -95,7 +99,10 @@ end
 
 class QueryServerRunner < OSProcessRunner
   
-  COMMANDS = {"js" => "#{COUCH_ROOT}/src/couchdb/couchjs #{COUCH_ROOT}/share/server/main.js" }
+  COMMANDS = {
+    "js" => "#{COUCH_ROOT}/src/couchdb/couchjs #{COUCH_ROOT}/share/server/main.js",
+    "php" => "#{COUCH_ROOT}/contrib/query-servers/php/query-server.php"
+  }
 
   def self.run_command
     COMMANDS[LANGUAGE]
@@ -109,11 +116,13 @@ class ExternalRunner < OSProcessRunner
 end
 
 functions = {
-  "emit-twice" => {
-    "js" => %{function(doc){emit("foo",doc.a); emit("bar",doc.a)}}
-  },
   "emit-once" => {
-    "js" => %{function(doc){emit("baz",doc.a)}}
+    "js" => %{function(doc){emit("baz",doc.a)}},
+    "php" => %{function($doc) { emit("baz", $doc->a);}}
+  },
+  "emit-twice" => {
+    "js" => %{function(doc){emit("foo",doc.a); emit("bar",doc.a)}},
+    "php" => %{function($doc) { emit("foo", $doc->a); emit("bar", $doc->a);}}
   },
   "reduce-values-length" => {
     "js" => %{function(keys, values, rereduce) { return values.length; }}
@@ -254,9 +263,21 @@ describe "query server normal case" do
     @qs.close
   end
   it "should reset" do
-    @qs.run(["reset"]).should == true    
+    @qs.run(["reset"]).should == true
   end
-  it "should run map funs" do
+  it "should run a map fun" do
+    @qs.reset!
+    @qs.run(["add_fun", functions["emit-once"][LANGUAGE]]).should == true
+    rows = @qs.run(["map_doc", {:a => "b"}])
+    rows[0][0].should == ["baz", "b"]
+  end
+  it "should run a map fun again" do
+    @qs.reset!
+    @qs.run(["add_fun", functions["emit-once"][LANGUAGE]]).should == true
+    rows = @qs.run(["map_doc", {:a => "b"}])
+    rows[0][0].should == ["baz", "b"]
+  end
+  it "should run multiple map funs" do
     @qs.reset!
     @qs.run(["add_fun", functions["emit-twice"][LANGUAGE]]).should == true
     @qs.run(["add_fun", functions["emit-once"][LANGUAGE]]).should == true
