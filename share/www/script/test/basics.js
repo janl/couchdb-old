@@ -101,7 +101,7 @@ couchTests.basics = function(debug) {
     db.save(existingDoc);
 
     // redo the map query
-    results = db.query(mapFunction);
+    var results = db.query(mapFunction);
 
     // the modified document should now be in the results.
     T(results.total_rows == 2);

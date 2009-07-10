@@ -288,6 +288,15 @@
           });
         },
         query: function(mapFun, reduceFun, language, options) {
+          
+        /*
+          get last 100 docs
+             get last seq id
+             startkeuy = (last_seq_id - 100 > 0) last_seq_id-100:0
+          store docs locally
+          run map over docs, store results
+          run reduce over docs, store resultss
+        */   
           options = options || {};
           language = language || "javascript"
           if (typeof(mapFun) != "string") {

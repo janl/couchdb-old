@@ -128,28 +128,121 @@ function CouchDB(name, httpHeaders) {
 
   // Applies the map function to the contents of database and returns the results.
   this.query = function(mapFun, reduceFun, options, keys) {
-    var body = {language: "javascript"};
-    if(keys) {
-      body.keys = keys ;      
+    var options = options || {};
+    this.last_req = this.request("GET", 
+      this.uri + "_all_docs_by_seq" + encodeOptions({include_docs: true}));
+    var docs = JSON.parse(this.last_req.responseText).rows;
+
+    var tmp_db = [];
+    for(var idx in docs) {
+      tmp_db.push(docs[idx].doc);
     }
-    if (typeof(mapFun) != "string")
-      mapFun = mapFun.toSource ? mapFun.toSource() : "(" + mapFun.toString() + ")";
-    body.map = mapFun;
-    if (reduceFun != null) {
-      if (typeof(reduceFun) != "string")
-        reduceFun = reduceFun.toSource ? reduceFun.toSource() : "(" + reduceFun.toString() + ")";
-      body.reduce = reduceFun;
+
+    // utility functions
+    // TODO: share with view.js
+    var map_result = [];
+    emit = function(key, value) {
+      map_result.push([key, value]);
     }
-    if (options && options.options != undefined) {
-        body.options = options.options;
-        delete options.options;
+
+    sum = function(values) {
+      var rv = 0;
+      for (var i in values) {
+        rv += values[i];
+      }
+      return rv;
     }
-    this.last_req = this.request("POST", this.uri + "_temp_view" + encodeOptions(options), {
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify(body)
+
+    for(var idx in tmp_db) {
+      var doc = tmp_db[idx];
+      if(doc) {
+        mapFun(doc);
+      }
+    }
+
+    // sort map results by key
+    map_result.sort(function(a, b) {
+      if(a[0] === b[0]) {
+        return 0;
+      } else {
+        return (a[0] > b[0]) ? 1 : -1;
+      }
     });
-    CouchDB.maybeThrowError(this.last_req);
-    return JSON.parse(this.last_req.responseText);
+
+    var apply_options = function(map, opts) {
+      var opts = opts || {};
+      var startkey = opts.startkey || 0;
+      var endkey = opts.endkey || 10000000000000000000;
+      var result = [];
+      for(var idx in map) {
+        var row = map[idx];
+        if(row[0] >= startkey && row[0] <= endkey) {
+          result.push(row);
+        }
+      }
+      return result;
+    };
+
+    map_result = apply_options(map_result, options);
+
+    var map_result_groups = [];
+    var group_map_result function(map_result) {
+      for(var idx in map_result) {
+        var last_row = map_result_groups[map_result_groups.length - 1] || null;
+        var row = map_result[idx];
+        if(last_row && last_row.key == row[0]) {
+          var map_result_groups[last_row.key].push(row);
+        } else {
+          var map_result_groups[last_row.key] = [row];
+        }
+      }
+      return map_result_groups;
+    };
+    map_result_groups = group_map_result(map_result);
+
+    // run reduce on map
+    var keys = new Array(map_result.length);
+    var values = new Array(map_result.length);
+    for(var i = 0; i < map_result.length; i++) {
+        keys[i] = map_result[i][0];
+        values[i] = map_result[i][1];
+    }
+
+    // TODO
+    //  - reduce groups
+    //  - treat group = false as special case?
+
+    if(reduceFun) {
+      var reduce_result = reduceFun(keys, values, false);
+      return {rows: [{key:null, value: reduce_result}]};
+    } else {
+      var rows = map_result.map(function(kv) {
+        return {"total_rows": map_result.length, "offset": options.startkey,key:kv[0], value:kv[1]};
+      });
+      return {"total_rows": map_result.length, "offset": options.startkey, "rows": rows};
+    }
+    // var body = {language: "javascript"};
+    // if(keys) {
+    //   body.keys = keys ;      
+    // }
+    // if (typeof(mapFun) != "string")
+    //   mapFun = mapFun.toSource ? mapFun.toSource() : "(" + mapFun.toString() + ")";
+    // body.map = mapFun;
+    // if (reduceFun != null) {
+    //   if (typeof(reduceFun) != "string")
+    //     reduceFun = reduceFun.toSource ? reduceFun.toSource() : "(" + reduceFun.toString() + ")";
+    //   body.reduce = reduceFun;
+    // }
+    // if (options && options.options != undefined) {
+    //     body.options = options.options;
+    //     delete options.options;
+    // }
+    // this.last_req = this.request("POST", this.uri + "_temp_view" + encodeOptions(options), {
+    //   headers: {"Content-Type": "application/json"},
+    //   body: JSON.stringify(body)
+    // });
+    // CouchDB.maybeThrowError(this.last_req);
+    // return JSON.parse(this.last_req.responseText);
   }
 
   this.view = function(viewname, options, keys) {
