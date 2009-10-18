@@ -12,6 +12,7 @@
 
 -module(couch_log).
 -behaviour(gen_event).
+-include("couch_db.hrl").
 
 -export([start_link/0,stop/0]).
 -export([debug_on/0,info_on/0,get_level/0,get_level_integer/0, set_level/1]).
@@ -22,6 +23,8 @@
 -define(LEVEL_INFO, 2).
 -define(LEVEL_DEBUG, 1).
 -define(LEVEL_TMI, 0).
+
+-define(USER_CTX_ADMIN, #user_ctx{roles=[<<"_admin">>]}).
 
 level_integer(error)    -> ?LEVEL_ERROR;
 level_integer(info)     -> ?LEVEL_INFO;
@@ -50,11 +53,22 @@ init([]) ->
         fun("log", "file") ->
             ?MODULE:stop();
         ("log", "level") ->
+            ?MODULE:stop();
+        ("log", "database") ->
             ?MODULE:stop()
         end),
 
     Filename = couch_config:get("log", "file", "couchdb.log"),
     Level = couch_config:get("log", "level", "info"),
+    DbName = couch_config:get("log", "database", false),
+
+    % create the log database if we have one
+    case DbName of
+    false -> ok;
+    _Else ->
+        catch couch_server:create(?l2b(DbName),
+            [{user_ctx, ?USER_CTX_ADMIN}])
+    end,
 
     {ok, Fd} = file:open(Filename, [append]),
     {ok, {Fd, level_integer(list_to_atom(Level))}}.
@@ -116,12 +130,33 @@ code_change(_OldVsn, State, _Extra) ->
 terminate(_Arg, {Fd, _LoggingLevel}) ->
     file:close(Fd).
 
+log_to_db(DbName, [Date, Level, Pid, Msg]) ->
+    case couch_db:open(?l2b(DbName), [{user_ctx, ?USER_CTX_ADMIN}]) of
+    {ok, Db} ->
+        couch_db:monitor(Db),
+        Json = [
+            {<<"_id">>, ?l2b(Date)},
+            {<<"level">>, ?l2b(atom_to_list(Level))},
+            {<<"pid">>, ?l2b(lists:flatten(io_lib:format("~w", [Pid])))},
+            {<<"message">>, ?l2b(Msg)}
+        ],
+        Doc = couch_doc:from_json_obj({Json}),
+        couch_db:update_doc(Db, Doc, [delay_commit]);
+    {not_found, no_db_file} -> throw({db_not_found, DbName})
+    end.
+
 log(Fd, Pid, Level, Format, Args) ->
     Msg = io_lib:format(Format, Args),
     ok = io:format("[~s] [~p] ~s~n", [Level, Pid, Msg]), % dump to console too
     Msg2 = re:replace(lists:flatten(Msg),"\\r\\n|\\r|\\n", "\r\n",
         [global, {return, list}]),
-    ok = io:format(Fd, "[~s] [~s] [~p] ~s\r~n\r~n", [httpd_util:rfc1123_date(), Level, Pid, Msg2]).
+    LogArgs = [httpd_util:rfc1123_date(), Level, Pid, Msg2],
+    DbName = couch_config:get("log", "database", false),
+    case DbName of
+    false -> ok;
+    _Else -> log_to_db(DbName, LogArgs)
+    end,
+    ok = io:format(Fd, "[~s] [~s] [~p] ~s\r~n\r~n", LogArgs).
 
 read(Bytes, Offset) ->
     LogFileName = couch_config:get("log", "file"),

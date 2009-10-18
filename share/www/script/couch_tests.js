@@ -55,6 +55,7 @@ loadTest("invalid_docids.js");
 loadTest("jsonp.js");
 loadTest("large_docs.js");
 loadTest("list_views.js");
+loadTest("log_database.js");
 loadTest("lots_of_docs.js");
 loadTest("multiple_rows.js");
 loadScript("script/oauth.js");
