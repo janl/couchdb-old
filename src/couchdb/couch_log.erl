@@ -60,11 +60,11 @@ init([]) ->
 
     Filename = couch_config:get("log", "file", "couchdb.log"),
     Level = couch_config:get("log", "level", "info"),
-    DbName = couch_config:get("log", "database", false),
+    DbName = couch_config:get("log", "database", ""),
 
     % create the log database if we have one
     case DbName of
-    false -> ok;
+    "" -> ok;
     _Else ->
         catch couch_server:create(?l2b(DbName),
             [{user_ctx, ?USER_CTX_ADMIN}])
@@ -151,9 +151,9 @@ log(Fd, Pid, Level, Format, Args) ->
     Msg2 = re:replace(lists:flatten(Msg),"\\r\\n|\\r|\\n", "\r\n",
         [global, {return, list}]),
     LogArgs = [httpd_util:rfc1123_date(), Level, Pid, Msg2],
-    DbName = couch_config:get("log", "database", false),
+    DbName = couch_config:get("log", "database", ""),
     case DbName of
-    false -> ok;
+    "" -> ok;
     _Else -> log_to_db(DbName, LogArgs)
     end,
     ok = io:format(Fd, "[~s] [~s] [~p] ~s\r~n\r~n", LogArgs).
