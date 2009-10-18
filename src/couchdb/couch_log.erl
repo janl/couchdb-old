@@ -135,7 +135,7 @@ log_to_db(DbName, [Date, Level, Pid, Msg]) ->
     {ok, Db} ->
         couch_db:monitor(Db),
         Json = [
-            {<<"_id">>, ?l2b(Date)},
+            {<<"_id">>, ?l2b(Date ++ " " ++ couch_uuids:random())},
             {<<"level">>, ?l2b(atom_to_list(Level))},
             {<<"pid">>, ?l2b(lists:flatten(io_lib:format("~w", [Pid])))},
             {<<"message">>, ?l2b(Msg)}
