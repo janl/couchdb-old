@@ -366,7 +366,7 @@ reply_all(#group_state{waiting_list=WaitList}=State, Reply) ->
 prepare_group({RootDir, DbName, #group{sig=Sig}=Group}, ForceReset)->
     case couch_db:open(DbName, []) of
     {ok, Db} ->
-        case open_index_file(RootDir, DbName, Sig) of
+        case open_index_file(RootDir, DbName, Group) of
         {ok, Fd} ->
             if ForceReset ->
                 % this can happen if we missed a purge
@@ -412,11 +412,20 @@ index_file_name(compact, RootDir, DbName, GroupSig) ->
     design_root(RootDir, DbName) ++ hex_sig(GroupSig) ++".compact.view".
 
 
-open_index_file(RootDir, DbName, GroupSig) ->
+open_index_file(RootDir, DbName, #group{name=GroupId, sig=GroupSig}) ->
     FileName = index_file_name(RootDir, DbName, GroupSig),
     case couch_file:open(FileName) of
     {ok, Fd}        -> {ok, Fd};
-    {error, enoent} -> couch_file:open(FileName, [create]);
+    {error, enoent} ->
+        % let's see if we have a 0.9-style view file
+        OldFileName = RootDir ++ "/." ++ ?b2l(DbName) ++ ?b2l(GroupId) ++ ".view",
+        ?LOG_DEBUG("Found 0.9-style view file '~s'. "
+            ++ "You might want to compact it.", [OldFileName]),
+        case couch_file:open(OldFileName) of
+        {ok, Fd}        -> {ok, Fd};
+        {error, enoent} -> couch_file:open(FileName, [create]);
+        Error           -> Error
+        end;
     Error           -> Error
     end.
 

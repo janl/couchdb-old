@@ -26,6 +26,8 @@ update(Owner, Group) ->
     couch_task_status:add_task(<<"View Group Indexer">>, <<DbName/binary," ",GroupName/binary>>, <<"Starting index update">>),
 
     DbPurgeSeq = couch_db:get_purge_seq(Db),
+    io:format("DbPurgeSeq: '~p'~n", [DbPurgeSeq]),
+    io:format("PurgeSeq: '~p'~n", [PurgeSeq]),
     Group2 =
     if DbPurgeSeq == PurgeSeq ->
         Group;
@@ -34,6 +36,7 @@ update(Owner, Group) ->
         purge_index(Group);
     true ->
         couch_task_status:update(<<"Resetting view index due to lost purge entries.">>),
+        io:format("Resetting view index due to lost purge entries.: '~p'~n", [res]),
         exit(reset)
     end,
     {ok, MapQueue} = couch_work_queue:new(100000, 500),
