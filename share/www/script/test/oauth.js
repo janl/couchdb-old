@@ -112,7 +112,7 @@ couchTests.oauth = function(debug) {
       usersDb.createDb();
         
       // Create a user
-      T(CouchDB.createUser("jason", "testpassword", "test@somemail.com", ['test'], adminBasicAuthHeaderValue()).ok);
+      T(CouchDB.createUser("jason", "testpassword", "test@somemail.com", ['test', '_admin'], adminBasicAuthHeaderValue()).ok);
 
       var accessor = {
         consumerSecret: consumerSecret,
