@@ -318,11 +318,12 @@ btree_by_seq_reduce(reduce, DocInfos) ->
 btree_by_seq_reduce(rereduce, Reds) ->
     lists:sum(Reds).
 
-simple_upgrade_record(Old, New) when size(Old) == size(New)->
+simple_upgrade_record(Old, New) when tuple_size(Old) =:= tuple_size(New) ->
     Old;
 simple_upgrade_record(Old, New) ->
+    OldSz = tuple_size(Old),
     NewValuesTail =
-        lists:sublist(tuple_to_list(New), size(Old) + 1, size(New)-size(Old)),
+        lists:sublist(tuple_to_list(New), OldSz + 1, tuple_size(New) - OldSz),
     list_to_tuple(tuple_to_list(Old) ++ NewValuesTail).
 
 
@@ -464,6 +465,19 @@ merge_rev_trees(MergeConflicts, [NewDocs|RestDocsList],
                 {_NewTree, conflicts} when (not OldDeleted) ->
                     send_result(Client, Id, {Pos-1,PrevRevs}, conflict),
                     AccTree;
+                {NewTree, conflicts} when PrevRevs /= [] ->
+                    % Check to be sure if prev revision was specified, it's
+                    % a leaf node in the tree
+                    Leafs = couch_key_tree:get_all_leafs(AccTree),
+                    IsPrevLeaf = lists:any(fun({_, {LeafPos, [LeafRevId|_]}}) ->
+                            {LeafPos, LeafRevId} == {Pos-1, hd(PrevRevs)}
+                        end, Leafs),
+                    if IsPrevLeaf ->
+                        NewTree;
+                    true ->
+                        send_result(Client, Id, {Pos-1,PrevRevs}, conflict),
+                        AccTree
+                    end;
                 {NewTree, no_conflicts} when  AccTree == NewTree ->
                     % the tree didn't change at all
                     % meaning we are saving a rev that's already
@@ -751,9 +765,9 @@ copy_compact(Db, NewDb0, Retry) ->
     fun(#doc_info{high_seq=Seq}=DocInfo, _Offset, {AccNewDb, AccUncopied, TotalCopied}) ->
         couch_task_status:update("Copied ~p of ~p changes (~p%)",
                 [TotalCopied, TotalChanges, (TotalCopied*100) div TotalChanges]),
-        if TotalCopied rem 1000 == 0 ->
+        if TotalCopied rem 1000 =:= 0 ->
             NewDb2 = copy_docs(Db, AccNewDb, lists:reverse([DocInfo | AccUncopied]), Retry),
-            if TotalCopied rem 10000 == 0 ->
+            if TotalCopied rem 10000 =:= 0 ->
                 {ok, {commit_data(NewDb2#db{update_seq=Seq}), [], TotalCopied + 1}};
             true ->
                 {ok, {NewDb2#db{update_seq=Seq}, [], TotalCopied + 1}}

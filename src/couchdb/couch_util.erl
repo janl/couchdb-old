@@ -20,6 +20,7 @@
     to_hex/1,parse_term/1, dict_find/3]).
 -export([file_read_size/1, get_nested_json_value/2, json_user_ctx/1]).
 -export([to_binary/1, to_integer/1, to_list/1, url_encode/1]).
+-export([json_encode/1, json_decode/1]).
 
 -include("couch_db.hrl").
 -include_lib("kernel/include/file.hrl").
@@ -49,11 +50,11 @@ start_driver(LibDir) ->
 
 % works like list_to_existing_atom, except can be list or binary and it
 % gives you the original value instead of an error if no existing atom.
-to_existing_atom(V) when is_list(V)->
+to_existing_atom(V) when is_list(V) ->
     try list_to_existing_atom(V) catch _ -> V end;
-to_existing_atom(V) when is_binary(V)->
+to_existing_atom(V) when is_binary(V) ->
     try list_to_existing_atom(?b2l(V)) catch _ -> V end;
-to_existing_atom(V) when is_atom(V)->
+to_existing_atom(V) when is_atom(V) ->
     V.
 
 
@@ -76,7 +77,7 @@ to_digit(N) when N < 10 -> $0 + N;
 to_digit(N)             -> $a + N-10.
 
 
-parse_term(Bin) when is_binary(Bin)->
+parse_term(Bin) when is_binary(Bin) ->
     parse_term(binary_to_list(Bin));
 parse_term(List) ->
     {ok, Tokens, _} = erl_scan:string(List ++ "."),
@@ -148,14 +149,14 @@ ascii_lower([], Acc) ->
     lists:reverse(Acc);
 ascii_lower([Char | RestString], Acc) when Char >= $A, Char =< $B ->
     ascii_lower(RestString, [Char + ($a-$A) | Acc]);
-ascii_lower([Char | RestString], Acc)->
+ascii_lower([Char | RestString], Acc) ->
     ascii_lower(RestString, [Char | Acc]).
 
 % Is a character whitespace?
-is_whitespace($\s)-> true;
-is_whitespace($\t)-> true;
-is_whitespace($\n)-> true;
-is_whitespace($\r)-> true;
+is_whitespace($\s) -> true;
+is_whitespace($\t) -> true;
+is_whitespace($\n) -> true;
+is_whitespace($\r) -> true;
 is_whitespace(_Else) -> false.
 
 
@@ -206,9 +207,8 @@ collate(A, B, Options) when is_binary(A), is_binary(B) ->
         true -> 1; % Case insensitive
         false -> 0 % Case sensitive
     end,
-
-    SizeA = size(A),
-    SizeB = size(B),
+    SizeA = byte_size(A),
+    SizeB = byte_size(B),
     Bin = <<SizeA:32/native, A/binary, SizeB:32/native, B/binary>>,
     [Result] = erlang:port_control(drv_port(), Operation, Bin),
     % Result is 0 for lt, 1 for eq and 2 for gt. Subtract 1 to return the
@@ -227,9 +227,7 @@ should_flush(MemThreshHold) ->
         {memory, ProcMem2} = process_info(self(), memory),
         BinMem2 = lists:foldl(fun({_Id, Size, _NRefs}, Acc) -> Size+Acc end,
             0, element(2,process_info(self(), binary))),
-        if ProcMem2+BinMem2 > MemThreshHold ->
-            true;
-        true -> false end;
+        ProcMem2+BinMem2 > MemThreshHold;
     true -> false end.
 
 
@@ -287,7 +285,7 @@ encodeBase64Url(<<>>, Acc) ->
 %%
 %% decodeBase64(BinaryChars) -> Binary
 %%
-decodeBase64(Cs) when is_list(Cs)->
+decodeBase64(Cs) when is_list(Cs) ->
     decodeBase64(list_to_binary(Cs));
 decodeBase64(Cs) ->
     decode1(Cs, <<>>).
@@ -304,7 +302,7 @@ decode1(<<C1, C2, C3, C4, Cs/binary>>, Acc) ->
 decode1(<<>>, Acc) ->
     Acc.
 
-decodeBase64Url(Cs) when is_list(Cs)->
+decodeBase64Url(Cs) when is_list(Cs) ->
     decodeBase64Url(list_to_binary(Cs));
 decodeBase64Url(Cs) ->
     decode1Url(Cs, <<>>).
@@ -409,3 +407,16 @@ url_encode([H|T]) ->
     end;
 url_encode([]) ->
     [].
+
+json_encode(V) ->
+    Handler =
+    fun({L}) when is_list(L) ->
+        {struct,L};
+    (Bad) ->
+        exit({json_encode, {bad_term, Bad}})
+    end,
+    (mochijson2:encoder([{handler, Handler}]))(V).
+
+json_decode(V) ->
+    try (mochijson2:decoder([{object_hook, fun({struct,L}) -> {L} end}]))(V)
+    catch _:_ -> throw({invalid_json,V}) end.
