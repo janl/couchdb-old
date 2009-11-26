@@ -19,7 +19,7 @@
 oauth_authentication_handler(#httpd{mochi_req=MochiReq}=Req) ->
     serve_oauth(Req, fun(URL, Params, Consumer, Signature) ->
         AccessToken = proplists:get_value("oauth_token", Params),
-        TokenSecret = couch_config:get("oauth_token_secrets", AccessToken),
+        TokenSecret = get_token_secret(AccessToken),
         case oauth:verify(Signature, atom_to_list(MochiReq:get(method)), URL, Params, Consumer, TokenSecret) of
             true ->
                 set_user_ctx(Req, AccessToken);
@@ -34,7 +34,7 @@ set_user_ctx(Req, AccessToken) ->
     couch_httpd_auth:ensure_users_db_exists(?l2b(DbName)),
     case couch_db:open(?l2b(DbName), [{user_ctx, #user_ctx{roles=[<<"_admin">>]}}]) of
         {ok, Db} ->
-            Name = ?l2b(couch_config:get("oauth_token_users", AccessToken)),
+            Name = ?l2b(get_token_users(AccessToken)),
             case couch_httpd_auth:get_user(Db, Name) of
                 nil -> Req;
                 User ->
@@ -49,7 +49,7 @@ set_user_ctx(Req, AccessToken) ->
 handle_oauth_req(#httpd{path_parts=[_OAuth, <<"request_token">>], method=Method}=Req) ->
     serve_oauth(Req, fun(URL, Params, Consumer, Signature) ->
         AccessToken = proplists:get_value("oauth_token", Params),
-        TokenSecret = couch_config:get("oauth_token_secrets", AccessToken),
+        TokenSecret = get_token_secret(AccessToken),
         case oauth:verify(Signature, atom_to_list(Method), URL, Params, Consumer, TokenSecret) of
             true ->
                 ok(Req, <<"oauth_token=requestkey&oauth_token_secret=requestsecret">>);
@@ -86,7 +86,7 @@ serve_oauth_authorize(#httpd{method=Method}=Req) ->
             % Confirm with the User that they want to authenticate the Consumer
             serve_oauth(Req, fun(URL, Params, Consumer, Signature) ->
                 AccessToken = proplists:get_value("oauth_token", Params),
-                TokenSecret = couch_config:get("oauth_token_secrets", AccessToken),
+                TokenSecret = get_token_secret(AccessToken),
                 case oauth:verify(Signature, "GET", URL, Params, Consumer, TokenSecret) of
                     true ->
                         ok(Req, <<"oauth_token=requestkey&oauth_token_secret=requestsecret">>);
@@ -98,7 +98,7 @@ serve_oauth_authorize(#httpd{method=Method}=Req) ->
             % If the User has confirmed, we direct the User back to the Consumer with a verification code
             serve_oauth(Req, fun(URL, Params, Consumer, Signature) ->
                 AccessToken = proplists:get_value("oauth_token", Params),
-                TokenSecret = couch_config:get("oauth_token_secrets", AccessToken),
+                TokenSecret = get_token_secret(AccessToken),
                 case oauth:verify(Signature, "POST", URL, Params, Consumer, TokenSecret) of
                     true ->
                         %redirect(oauth_callback, oauth_token, oauth_verifier),
@@ -163,7 +163,7 @@ consumer_lookup(Key, MethodStr) ->
     case SignatureMethod of
         undefined -> none;
         _SupportedMethod ->
-            case couch_config:get("oauth_consumer_secrets", Key, undefined) of
+            case get_consumer_secrets(Key) of
                 undefined -> none;
                 Secret -> {Key, Secret, SignatureMethod}
             end
@@ -171,3 +171,110 @@ consumer_lookup(Key, MethodStr) ->
 
 ok(#httpd{mochi_req=MochiReq}, Body) ->
     {ok, MochiReq:respond({200, [], Body})}.
+
+-define(DDOC_ID, <<"_design/oauth">>).
+
+ensure_oauth_views_exists(Db) ->
+    DDocId = ?DDOC_ID,
+    try couch_httpd_db:couch_doc_open(Db, DDocId, nil, []) of
+        _Foo -> ok
+    catch 
+        _:Error -> 
+            ?LOG_ERROR("create the design document ~p : ~p", [DDocId, Error]),
+            % create the design document
+            {ok, AuthDesign} = oauth_design_doc(DDocId),
+            {ok, _Rev} = couch_db:update_doc(Db, AuthDesign, []),
+            ?LOG_ERROR("created the design document", []),
+            ok
+    end.
+
+oauth_design_doc(DocId) ->
+    DocProps = [
+        {<<"_id">>, DocId},
+        {<<"language">>,<<"javascript">>},
+        {<<"views">>,
+            {[{<<"access-token-to-secret">>,
+                {[{<<"map">>,
+                    <<"function(doc) {\n  if(doc.secret && doc.type && doc.type == \"token-secret\") {\n    emit(doc._id, doc.secret);\n  }\n}">>
+                }]}
+            },
+            {<<"token-to-user">>,
+                {[{<<"map">>,
+                    <<"function(doc) {\n  if(doc.oauth_tokens && doc.username) {\n    doc.oauth_tokens.forEach(function(token) {\n      emit(token, doc.username); // we use doc._id later\n    });\n  }\n}">>
+                }]}
+            },
+            {<<"consumer-token-to-secret">>,
+                {[{<<"map">>,
+                    <<"function(doc) {\n  if(doc.secret && doc.type && doc.type == \"consumer-secret\") {\n    emit(doc._id, doc.secret);\n  }\n}">>
+                }]}
+            }
+            ]}
+        }],
+    {ok, couch_doc:from_json_obj({DocProps})}.
+
+use_user_db() ->
+    case couch_config:get("couch_httpd_oauth", "use_user_db", false) of
+    "true" -> 
+        UserDbName = couch_config:get("couch_httpd_auth", "authentication_db"),
+        {ok, Db} = couch_httpd_auth:ensure_users_db_exists(?l2b(UserDbName)),
+        ensure_oauth_views_exists(Db),
+        {ok, Db};
+    False -> False
+    end.
+
+%% returns a list() with the access token secret
+get_token_secret(Token) ->
+    case use_user_db() of
+    {ok, Db} -> 
+        case query_map_view(Db, ?DDOC_ID, <<"access-token-to-secret">>, Token) of
+            [] -> undefined;
+            Secret -> ?b2l(Secret)
+        end;
+    false ->
+        % fall back to ini file
+        couch_config:get("oauth_token_secrets", Token)
+    end.
+
+%% returns a list() with the user name
+get_token_users(Token) ->
+    case use_user_db() of
+    {ok, Db} -> 
+        case query_map_view(Db, ?DDOC_ID, <<"token-to-user">>, Token) of
+            [] -> undefined;
+            User -> ?b2l(User)
+        end;
+    false ->
+        % fall back to ini file
+        couch_config:get("oauth_token_users", Token)
+    end.
+
+%% returns a list() with the consumer token secret
+get_consumer_secrets(Token) ->
+    case use_user_db() of
+    {ok, Db} -> 
+        case query_map_view(Db, ?DDOC_ID, <<"consumer-token-to-secret">>, Token) of
+            [] -> undefined;
+            Secret -> ?b2l(Secret)
+        end;
+    false ->
+        % fall back to ini file
+        couch_config:get("oauth_consumer_secrets", Token, undefined)
+    end.
+
+%% simple view query, something hovercrafty might help make this simpler
+query_map_view(Db, DesignId, ViewName, Key1) ->
+    Key = ?l2b(Key1),
+    case (catch couch_view:get_map_view(Db, DesignId, ViewName, nil)) of
+    {ok, View, _Group} ->
+        FoldlFun = fun
+            ({{_Key, _DocId}, Value}, _, nil) -> {ok, Value};
+            (_, _, Acc) -> {stop, Acc}
+        end,
+        case couch_view:fold(View, {Key, nil}, fwd, FoldlFun, nil) of
+        {ok, nil} -> [];
+        {ok, Result} -> Result;
+        _Else -> []
+        end;
+    {not_found, _Reason} ->
+        []
+    end.

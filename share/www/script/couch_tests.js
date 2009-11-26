@@ -24,6 +24,8 @@ var couchTests = {};
 function loadTest(file) {
   loadScript("script/test/"+file);
 };
+
+
 // keep first
 loadTest("basics.js");
 
