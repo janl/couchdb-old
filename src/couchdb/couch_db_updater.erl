@@ -208,7 +208,13 @@ handle_info({update_docs, Client, GroupedDocs, NonRepDocs, MergeConflicts,
             {noreply, Db}
     end;
 handle_info(delayed_commit, Db) ->
-    {noreply, commit_data(Db)}.
+    case commit_data(Db) of
+        Db ->
+            {noreply, Db};
+        Db2 ->
+            ok = gen_server:call(Db2#db.main_pid, {db_updated, Db2}),
+            {noreply, Db2}
+    end.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.

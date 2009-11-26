@@ -80,10 +80,26 @@ couchTests.stats = function(debug) {
     var testFun = function() {
       var pre_dbs = getStat("couchdb", "open_databases").current || 0;
       var pre_files = getStat("couchdb", "open_os_files").current || 0;
-      
+     
+      // We have to make sure that as we open the max'th database
+      // that we've waited for more than 1 second since opening
+      // the first database so that any delayed commits will be
+      // flushed.
+      var triggered = false;
+      var db = null;
       for(var i = 0; i < max*2; i++) {
-        newDb("test_suite_db_" + i, true);
+        try {
+          db = newDb("test_suite_db_" + i, true);
+        } catch(e) {
+          triggered = true;
+          CouchDB.request("GET", "/_sleep?time=1500");
+          db = newDb("test_suite_db_" + i, true);
+        }
+
+        // Trigger a delayed commit
+        db.save({_id: "" + i, "lang": "Awesome!"});
       }
+      T(triggered, "We managed to force a all_dbs_active error.");
       
       var open_dbs = getStat("couchdb", "open_databases").current;
       TEquals(open_dbs > 0, true, "We actually opened some dbs.");
