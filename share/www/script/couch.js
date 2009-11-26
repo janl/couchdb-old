@@ -91,7 +91,7 @@ function CouchDB(name, httpHeaders) {
     return result;
   }
 
-  this.bulkSave = function(docs, options) {
+  this.bulkSave = function(docs, options, headers) {
     // first prepoulate the UUIDs for new documents
     var newCount = 0
     for (var i=0; i<docs.length; i++) {
@@ -99,7 +99,7 @@ function CouchDB(name, httpHeaders) {
         newCount++;
       }
     }
-    var newUuids = CouchDB.newUuids(docs.length);
+    var newUuids = CouchDB.newUuids(docs.length, null, headers);
     var newCount = 0
     for (var i=0; i<docs.length; i++) {
       if (docs[i]._id == undefined) {
@@ -111,8 +111,10 @@ function CouchDB(name, httpHeaders) {
     for (var option in options) {
       json[option] = options[option];
     }
+
     this.last_req = this.request("POST", this.uri + "_bulk_docs", {
-      body: JSON.stringify(json)
+      body: JSON.stringify(json),
+      headers: headers
     });
     if (this.last_req.status == 417) {
       return {errors: JSON.parse(this.last_req.responseText)};
@@ -334,13 +336,21 @@ CouchDB.logout = function() {
   return JSON.parse(CouchDB.last_req.responseText);
 }
 
-CouchDB.createUser = function(username, password, email, roles, basicAuth) {
+CouchDB.createUser = function(username, password, email, roles, basicAuth, oauthTokens) {
   var roles_str = ""
   if (roles) {
-    for (var i=0; i< roles.length; i++) {
+    for (var i=0; i < roles.length; i++) {
       roles_str += "&roles=" + encodeURIComponent(roles[i]);
     }
   }
+
+  var oauth_token_string = "";
+  if (oauthTokens) {
+    for(var i=0; i < oauthTokens.length; i++) {
+      oauth_token_string += "&oauthTokens=" + encodeURIComponent(oauthTokens[i]);
+    }
+  }
+
   var headers = {"Content-Type": "application/x-www-form-urlencoded"};
   if (basicAuth) {
     headers['Authorization'] = basicAuth
@@ -350,14 +360,14 @@ CouchDB.createUser = function(username, password, email, roles, basicAuth) {
 
   CouchDB.last_req = CouchDB.request("POST", "/_user/", {
     headers: headers,
-    body: "username=" + encodeURIComponent(username) + "&password="
-    + encodeURIComponent(password) + "&email="
-    + encodeURIComponent(email) + roles_str
+    body: "username=" + encodeURIComponent(username) + "&password=" 
+      + encodeURIComponent(password) 
+      + "&email="+ encodeURIComponent(email) + roles_str + oauth_token_string
   });
   return JSON.parse(CouchDB.last_req.responseText);
 }
 
-CouchDB.updateUser = function(username, email, roles, password, old_password) {
+CouchDB.updateUser = function(username, email, roles, password, old_password, oauthTokens) {
   var roles_str = ""
   if (roles) {
     for (var i=0; i< roles.length; i++) {
@@ -365,7 +375,14 @@ CouchDB.updateUser = function(username, email, roles, password, old_password) {
     }
   }
 
-  var body = "email="+ encodeURIComponent(email)+ roles_str;
+  var oauth_token_string = "";
+  if (oauthTokens) {
+    for(var i=0; i < oauthTokens.length; i++) {
+      oauth_token_string += "&oauthTokens=" + encodeURIComponent(oauthTokens[i]);
+    }
+  }
+
+  var body = "email="+ encodeURIComponent(email) + roles_str + oauth_token_string;
 
   if (typeof(password) != "undefined" && password) {
     body += "&password=" + password;
@@ -456,8 +473,9 @@ CouchDB.requestStats = function(module, key, test) {
 
 CouchDB.uuids_cache = [];
 
-CouchDB.newUuids = function(n, buf) {
-  buf = buf || 100;
+CouchDB.newUuids = function(n, buf, headers) {
+  var buf = buf || 100;
+  var headers = headers || {};
   if (CouchDB.uuids_cache.length >= n) {
     var uuids = CouchDB.uuids_cache.slice(CouchDB.uuids_cache.length - n);
     if(CouchDB.uuids_cache.length - n == 0) {
@@ -468,7 +486,9 @@ CouchDB.newUuids = function(n, buf) {
     }
     return uuids;
   } else {
-    CouchDB.last_req = CouchDB.request("GET", "/_uuids?count=" + (buf + n));
+    CouchDB.last_req = CouchDB.request("GET", "/_uuids?count=" + (buf + n),
+     { headers: headers}
+    );
     CouchDB.maybeThrowError(CouchDB.last_req);
     var result = JSON.parse(CouchDB.last_req.responseText);
     CouchDB.uuids_cache =

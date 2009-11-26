@@ -67,7 +67,20 @@ default_authentication_handler(Req) ->
         true ->
             Req#httpd{user_ctx=#user_ctx{name=?l2b(User), roles=[<<"_admin">>]}};
         false ->
-            throw({unauthorized, <<"Name or password is incorrect.">>})
+            % Look up user from db
+            UserDoc = case get_user(?l2b(User)) of
+                nil -> [];
+                Result -> Result
+            end,
+            UserSalt = proplists:get_value(<<"salt">>, UserDoc, <<>>),
+            PasswordHash = hash_password(?l2b(Pass), UserSalt),
+            case proplists:get_value(<<"password_sha">>, UserDoc, nil) of
+                ExpectedHash when ExpectedHash == PasswordHash ->
+                    Req#httpd{user_ctx=#user_ctx{name=?l2b(User),
+                        roles=proplists:get_value(<<"roles">>, UserDoc, [])}};
+                _ ->
+                    throw({unauthorized, <<"Name or password is incorrect.">>})
+            end
         end;
     nil ->
         case couch_server:has_admins() of
@@ -142,7 +155,7 @@ get_user(UserName) ->
             % end
         end
     end.
-    
+
 ensure_users_db_exists(DbName) ->
     case couch_db:open(DbName, [{user_ctx, #user_ctx{roles=[<<"_admin">>]}}]) of
     {ok, Db} ->
@@ -153,7 +166,7 @@ ensure_users_db_exists(DbName) ->
         ?LOG_ERROR("Created the db ~p", [DbName]),
         {ok, Db}
     end.
-    
+
 ensure_users_view_exists(Db, DDocId, VName) -> 
     try couch_httpd_db:couch_doc_open(Db, DDocId, nil, []) of
         _Foo -> ok
@@ -181,9 +194,9 @@ auth_design_doc(DocId, VName) ->
     {ok, couch_doc:from_json_obj({DocProps})}.
     
 
-user_doc(DocId, Username, UserSalt, PasswordHash, Email, Active, Roles) ->
-    user_doc(DocId, Username, UserSalt, PasswordHash, Email, Active, Roles, nil).
-user_doc(DocId, Username, UserSalt, PasswordHash, Email, Active, Roles, Rev) ->
+user_doc(DocId, Username, UserSalt, PasswordHash, Email, Active, Roles, OauthTokens) ->
+    user_doc(DocId, Username, UserSalt, PasswordHash, Email, Active, Roles, OauthTokens, nil).
+user_doc(DocId, Username, UserSalt, PasswordHash, Email, Active, Roles, OauthTokens, Rev) ->
     DocProps = [
         {<<"_id">>, DocId},
         {<<"type">>, <<"user">>},
@@ -192,7 +205,8 @@ user_doc(DocId, Username, UserSalt, PasswordHash, Email, Active, Roles, Rev) ->
         {<<"salt">>, UserSalt},
         {<<"email">>, Email},
         {<<"active">>, Active},
-        {<<"roles">>, Roles}],
+        {<<"roles">>, Roles},
+        {<<"oauth_tokens">>, OauthTokens}],
     DocProps1 = case Rev of
     nil -> DocProps;
     _Rev -> 
@@ -347,6 +361,8 @@ create_user_req(#httpd{method='POST', mochi_req=MochiReq}=Req, Db) ->
             []
     end,
     Roles = proplists:get_all_values("roles", Form),
+    OauthTokens = lists:map(fun(Elm) -> ?l2b(Elm) end, 
+        proplists:get_all_values("oauthTokens", Form)),
     UserName = ?l2b(proplists:get_value("username", Form, "")),
     Password = ?l2b(proplists:get_value("password", Form, "")),
     Email = ?l2b(proplists:get_value("email", Form, "")),
@@ -359,11 +375,11 @@ create_user_req(#httpd{method='POST', mochi_req=MochiReq}=Req, Db) ->
             ok = couch_httpd:verify_is_server_admin(Req),
             [?l2b(R) || R <- Roles]
         end,
-            
+
         UserSalt = couch_uuids:random(),
         PasswordHash = hash_password(Password, UserSalt),
         DocId = couch_uuids:random(),
-        {ok, UserDoc} = user_doc(DocId, UserName, UserSalt, PasswordHash, Email, Active, Roles1),
+        {ok, UserDoc} = user_doc(DocId, UserName, UserSalt, PasswordHash, Email, Active, Roles1, OauthTokens),
         {ok, _Rev} = couch_db:update_doc(Db, UserDoc, []),
         ?LOG_DEBUG("User ~s (~s) with password, ~s created.", [?b2l(UserName), ?b2l(DocId), ?b2l(Password)]),
         {Code, Headers} = case couch_httpd:qs_value(Req, "next", nil) of
@@ -393,6 +409,7 @@ update_user_req(#httpd{method='PUT', mochi_req=MochiReq, user_ctx=UserCtx}=Req, 
                 []
         end,
         Roles = proplists:get_all_values("roles", Form),
+        OauthTokens = proplists:get_all_values("oauthTokens", Form),
         Password = ?l2b(proplists:get_value("password", Form, "")),
         Email = ?l2b(proplists:get_value("email", Form, "")),
         Active = couch_httpd_view:parse_bool_param(proplists:get_value("active", Form, "true")),
@@ -402,15 +419,14 @@ update_user_req(#httpd{method='PUT', mochi_req=MochiReq, user_ctx=UserCtx}=Req, 
         OldRev = proplists:get_value(<<"_rev">>, User, <<>>),
         DocId = proplists:get_value(<<"_id">>, User, <<>>),
         CurrentPasswordHash = proplists:get_value(<<"password_sha">>, User, nil),
-        
-        
+
         Roles1 = case Roles of
         [] -> Roles;
         _ ->
             ok = couch_httpd:verify_is_server_admin(Req),
             [?l2b(R) || R <- Roles]
         end,
-        
+
         PasswordHash = case lists:member(<<"_admin">>, UserRoles) of
         true ->
             case Password of
@@ -438,7 +454,7 @@ update_user_req(#httpd{method='PUT', mochi_req=MochiReq, user_ctx=UserCtx}=Req, 
         _ ->
             throw({forbidden, <<"You aren't allowed to change this password.">>})
         end, 
-        {ok, UserDoc} = user_doc(DocId, UserName, UserSalt, PasswordHash, Email, Active, Roles1, OldRev),
+        {ok, UserDoc} = user_doc(DocId, UserName, UserSalt, PasswordHash, Email, Active, Roles1, OauthTokens, OldRev),
         {ok, _Rev} = couch_db:update_doc(Db, UserDoc, []),
         ?LOG_DEBUG("User ~s (~s)updated.", [?b2l(UserName), ?b2l(DocId)]),
         {Code, Headers} = case couch_httpd:qs_value(Req, "next", nil) of
@@ -451,18 +467,17 @@ update_user_req(#httpd{method='PUT', mochi_req=MochiReq, user_ctx=UserCtx}=Req, 
 
 handle_user_req(#httpd{method='POST'}=Req) ->
     DbName = couch_config:get("couch_httpd_auth", "authentication_db"),
-    ensure_users_db_exists(?l2b(DbName)),
-    {ok, Db} = couch_db:open(?l2b(DbName),
-			     [{user_ctx, #user_ctx{roles=[<<"_admin">>]}}]),
-    create_user_req(Req, Db);
+    case ensure_users_db_exists(?l2b(DbName)) of
+        {ok, Db} -> create_user_req(Req, Db);
+        _ -> throw("couldn't create user database")
+    end;
 handle_user_req(#httpd{method='PUT', path_parts=[_]}=_Req) ->
     throw({bad_request, <<"Username is missing">>});
 handle_user_req(#httpd{method='PUT', path_parts=[_, UserName]}=Req) ->
     DbName = couch_config:get("couch_httpd_auth", "authentication_db"),
-    ensure_users_db_exists(?l2b(DbName)),
-    {ok, Db} = couch_db:open(?l2b(DbName),
-			     [{user_ctx, #user_ctx{roles=[<<"_admin">>]}}]),
-    update_user_req(Req, Db, UserName);
+    case ensure_users_db_exists(?l2b(DbName)) of
+        {ok, Db} -> update_user_req(Req, Db, UserName)
+    end;
 handle_user_req(Req) ->
     couch_httpd:send_method_not_allowed(Req, "POST,PUT").
 
