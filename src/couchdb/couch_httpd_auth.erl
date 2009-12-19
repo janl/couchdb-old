@@ -69,7 +69,7 @@ default_authentication_handler(Req) ->
         false ->
             % Look up user from db
             DbName = couch_config:get("couch_httpd_auth", "authentication_db"),
-            UserDb = ensure_users_db_exists(?l2b(DbName)),
+            {ok, UserDb} = ensure_users_db_exists(?l2b(DbName)),
             UserDoc = case get_user(UserDb, ?l2b(User)) of
                 nil -> [];
                 Result -> Result
