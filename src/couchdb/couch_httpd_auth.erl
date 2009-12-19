@@ -69,7 +69,7 @@ default_authentication_handler(Req) ->
         false ->
             % Look up user from db
             DbName = couch_config:get("couch_httpd_auth", "authentication_db"),
-            {ok, UserDb} = ensure_users_db_exists(?l2b(DbName)),
+            UserDb = ensure_users_db_exists(?l2b(DbName)),
             UserDoc = case get_user(UserDb, ?l2b(User)) of
                 nil -> [];
                 Result -> Result
@@ -172,10 +172,7 @@ ensure_users_db_exists(DbName) ->
         {ok, Db}
     end.
 
-ensure_users_view_exists(Db, DDocId, VName) ->
-    io:format("Db: '~p'~n", [Db]),
-    io:format("DDocId: '~p'~n", [DDocId]),
-    io:format("VName: '~p'~n", [VName]),
+ensure_users_view_exists(Db, DDocId, VName) -> 
     try couch_httpd_db:couch_doc_open(Db, DDocId, nil, []) of
         _Foo -> ok
     catch 
@@ -183,7 +180,6 @@ ensure_users_view_exists(Db, DDocId, VName) ->
             ?LOG_ERROR("create the design document ~p : ~p", [DDocId, Error]),
             % create the design document
             {ok, AuthDesign} = auth_design_doc(DDocId, VName),
-            io:format("AuthDesign: '~p'~n", [AuthDesign]),
             {ok, _Rev} = couch_db:update_doc(Db, AuthDesign, []),
             ?LOG_ERROR("created the design document", []),
             ok
