@@ -20,10 +20,19 @@ oauth_authentication_handler(#httpd{mochi_req=MochiReq}=Req) ->
     serve_oauth(Req, fun(URL, Params, Consumer, Signature) ->
         AccessToken = proplists:get_value("oauth_token", Params),
         TokenSecret = get_token_secret(AccessToken),
+        io:format("URL: '~p'~n", [URL]),
+        io:format("Params: '~p'~n", [Params]),
+        io:format("Consumer: '~p'~n", [Consumer]),
+        io:format("Signature: '~p'~n", [Signature]),
+        io:format("AccessToken: '~p'~n", [AccessToken]),
+        io:format("TokenSecret: '~p'~n", [TokenSecret]),
+        io:format("method: '~p'~n", [MochiReq:get(method)]),
         case oauth:verify(Signature, atom_to_list(MochiReq:get(method)), URL, Params, Consumer, TokenSecret) of
             true ->
+                io:format("set_user_ctx: '~p'~n", [set_user_ctx]),
                 set_user_ctx(Req, AccessToken);
             false ->
+                io:format("dont_set_user_ctx: '~p'~n", [dont_set_user_ctx]),
                 Req
         end
     end, true).
