@@ -57,6 +57,8 @@ couchTests.oauth = function(debug) {
     }
   }
 
+  var test_suite_users_db = "test_suite_users";
+
   var consumerSecret = generateSecret(64);
   var tokenSecret = generateSecret(64);
   var admintokenSecret = generateSecret(64);
@@ -86,11 +88,19 @@ couchTests.oauth = function(debug) {
     }
   };
 
+  var usersDb = new CouchDB(test_suite_users_db, {
+    "X-Couch-Full-Commit":"false",
+    "Authorization": adminBasicAuthHeaderValue()
+  });
+
+  var test_oauth_tokens_in_db = false;
+
   // this function will be called on the modified server
   var testFun = function () {
     try {
-      CouchDB.request("PUT", "http://" + host + "/_config/admins/testadmin", {
-        headers: {"X-Couch-Persist": "false"},
+      var testadminname = "testadmin";
+      CouchDB.request("PUT", "http://" + host + "/_config/admins/" + testadminname, {
+        headers: { "X-Couch-Persist": "false" },
         body: JSON.stringify(testadminPassword)
       });
 
@@ -104,15 +114,42 @@ couchTests.oauth = function(debug) {
         body: JSON.stringify("true")
       });
 
-      var usersDb = new CouchDB("test_suite_users", {
-        "X-Couch-Full-Commit":"false",
-        "Authorization": adminBasicAuthHeaderValue()
-      });
       usersDb.deleteDb();
       usersDb.createDb();
-        
+
+      // Create tokens
+      if(test_oauth_tokens_in_db) {
+        testadminname = "testadmin2";
+        T(CouchDB.createUser(testadminname, "testadminpassword", 
+          "testadmin2@somemail.com", ['testadmin2', '_admin'], 
+          adminBasicAuthHeaderValue()).ok, ["bar"]);
+          var tokens = [
+            {
+                _id: "key",
+                secret: consumerSecret,
+                type: "consumer-secret"
+            },
+            {
+              _id: "foo",
+              secret: tokenSecret,
+              type: "token-secret"
+            },
+            {
+              _id: "bar",
+              secret: admintokenSecret,
+              type: "token-secret"
+            }
+          ];
+        usersDb.bulkSave(tokens, null, {"Authorization": adminBasicAuthHeaderValue()});
+      }
+
       // Create a user
-      T(CouchDB.createUser("jason", "testpassword", "test@somemail.com", ['test'], adminBasicAuthHeaderValue()).ok);
+      var tokens = null;
+      if(test_oauth_tokens_in_db) {
+        tokens = ["foo"];
+      }
+      T(CouchDB.createUser("jason", "testpassword", "test@somemail.com", 
+        ['test', '_admin'], adminBasicAuthHeaderValue(), tokens).ok);
 
       var accessor = {
         consumerSecret: consumerSecret,
@@ -169,6 +206,13 @@ couchTests.oauth = function(debug) {
           T(xhr.status == expectedCode);
 
           // Replication
+          var dbA = new CouchDB("test_suite_db_a", {
+            "X-Couch-Full-Commit":"false",
+            "Authorization": adminBasicAuthHeaderValue()
+          });
+          dbA.deleteDb();
+          dbA.createDb();
+          T(dbA.save({_id:"_design/"+i+consumerKey}).ok);
           var result = CouchDB.replicate(dbPair.source, dbPair.target, {
             headers: {"Authorization": adminBasicAuthHeaderValue()}
           });
@@ -187,7 +231,7 @@ couchTests.oauth = function(debug) {
           xhr = oauthRequest("GET", "http://" + host + "/_session?foo=bar", message, adminAccessor);
           if (xhr.status == expectedCode == 200) {
             data = JSON.parse(xhr.responseText);
-            T(data.name == "testadmin");
+            T(data.name == testadminname);
             T(data.roles[0] == "_admin");
           }
         }
@@ -219,7 +263,7 @@ couchTests.oauth = function(debug) {
      {section: "couch_httpd_auth",
       key: "secret", value: generateSecret(64)},
      {section: "couch_httpd_auth",
-      key: "authentication_db", value: "test_suite_users"},
+      key: "authentication_db", value: test_suite_users_db},
      {section: "oauth_consumer_secrets",
       key: "key", value: consumerSecret},
      {section: "oauth_token_users",
@@ -232,6 +276,33 @@ couchTests.oauth = function(debug) {
       key: "bar", value: admintokenSecret},
      {section: "couch_httpd_oauth",
       key: "authorization_url", value: authorization_url}
+    ],
+    testFun
+  );
+
+  // test tokens in user db
+  var test_oauth_tokens_in_db = true;
+
+  // run on modded server, without secrets, same testFun though
+  run_on_modified_server(
+    [
+     {section: "httpd",
+      key: "WWW-Authenticate", value: 'Basic realm="administrator",OAuth'},
+     {section: "couch_httpd_auth",
+      key: "secret", value: generateSecret(64)},
+     {section: "couch_httpd_auth",
+      key: "authentication_db", value: test_suite_users_db},
+
+     {section: "oauth_token_users",
+      key: "foo", value: "jason"},
+     {section: "oauth_token_users",
+      key: "bar", value: "testadmin"},
+
+     {section: "couch_httpd_oauth",
+      key: "authorization_url", value: authorization_url},
+     {section: "couch_httpd_oauth",
+      key: "use_user_db", value: "true"}
+
     ],
     testFun
   );
