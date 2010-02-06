@@ -7,7 +7,8 @@ class Dispatcher
         return array(
             "reset" => array("ViewHandler", "reset"),
             "add_fun" => array("ViewHandler", "add_fun"),
-            "map_doc" => array("ViewHandler", "map_doc")
+            "map_doc" => array("ViewHandler", "map_doc"),
+            "ddoc" => array("ViewHandler", "ddoc")
             );
     }
 
@@ -18,7 +19,7 @@ class Dispatcher
         if($commands[$cmd]) {
             call_user_func($commands[$cmd], $args);
         } else {
-            $error = new Error("query_server_error", "unkown command '$cmd'");
+            $error = new Error("query_server_error", "unknown command '$cmd'");
             respond($error);
         }
     }

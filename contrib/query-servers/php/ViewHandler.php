@@ -74,4 +74,9 @@ class ViewHandler
         self::$functions = array();
         respond("true");
     }
+
+    function ddoc($args = null)
+    {
+        
+    }
 }

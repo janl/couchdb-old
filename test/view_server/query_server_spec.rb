@@ -117,7 +117,8 @@ class QueryServerRunner < OSProcessRunner
 
   COMMANDS = {
     "js" => "#{COUCH_ROOT}/bin/couchjs_dev #{COUCH_ROOT}/share/server/main.js",
-    "erlang" => "#{COUCH_ROOT}/test/view_server/run_native_process.es"
+    "erlang" => "#{COUCH_ROOT}/test/view_server/run_native_process.es",
+    "php" => "#{COUCH_ROOT}/contrib/query-servers/php/query-server.php"
   }
 
   def self.run_command
@@ -143,7 +144,8 @@ functions = {
         Emit(<<"foo">>, A),
         Emit(<<"bar">>, A)
       end.
-    ERLANG
+    ERLANG,
+    "php" => %{function($doc) { emit("foo", $doc->a); emit("bar", $doc->a);}}
   },
   "emit-once" => {
     "js" => <<-JS,
@@ -156,7 +158,8 @@ functions = {
             A = proplists:get_value(<<"a">>, Doc, null),
             Emit(<<"baz">>, A)
         end.
-    ERLANG
+    ERLANG,
+    "php" => %{function($doc) { emit("baz", $doc->a);}}
   },
   "reduce-values-length" => {
     "js" => %{function(keys, values, rereduce) { return values.length; }},
