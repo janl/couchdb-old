@@ -45,6 +45,7 @@ next(Server) ->
 stop(Server) ->
     gen_server:call(Server, stop).
 
+% remote source
 init([_Parent, #http_db{}=Source, Since, PostProps] = Args) ->
     process_flag(trap_exit, true),
     Feed = case proplists:get_value(<<"continuous">>, PostProps, false) of
@@ -53,11 +54,17 @@ init([_Parent, #http_db{}=Source, Since, PostProps] = Args) ->
     true ->
         continuous
     end,
+
+    Filter = case proplists:get_value(<<"filter">>, PostProps, false) of
+    false -> [];
+    Filter1 -> [{filter, ?l2b(Filter1)}]
+    end,
+
     Pid = couch_rep_httpc:spawn_link_worker_process(Source),
     Req = Source#http_db{
         resource = "_changes",
         qs = [{style, all_docs}, {heartbeat, 10000}, {since, Since},
-            {feed, Feed}],
+            {feed, Feed}|Filter],
         conn = Pid,
         options = [{stream_to, {self(), once}}, {response_format, binary},
             {inactivity_timeout, 31000}], % miss 3 heartbeats, assume death
@@ -91,6 +98,7 @@ init([_Parent, #http_db{}=Source, Since, PostProps] = Args) ->
         {stop, changes_timeout}
     end;
 
+% local source
 init([_Parent, Source, Since, PostProps] = InitArgs) ->
     process_flag(trap_exit, true),
     Server = self(),
