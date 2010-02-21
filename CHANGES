@@ -11,16 +11,24 @@ Security
  * Added default cookie-authentication and users database.
  * Added Futon user interface for user signup and login.
  * Added per-database reader access control lists.
- * Added per-database security object for configuration data in validation functions.
+ * Added per-database security object for configuration data in validation
+   functions.
+ * Added proxy authentication handler
 
 HTTP Interface
 
  * Provide Content-MD5 header support for attachments.
+ * Added URL Rewriter handler.
+ * Added virtual host handling.
 
 Build and System Integration
 
  * Added support for building a Windows installer as part of 'make dist'.
  * Bug fix for building couch.app's module list.
+ * ETap tests are now run during make distcheck. This included a number of
+   updates to the build system to properly support VPATH builds.
+ * Gavin McDonald setup a build-bot instance. More info can be found at
+   http://ci.apache.org/buildbot.html
 
 View Server
 
@@ -30,11 +38,15 @@ View Server
  * Improved view information objects.
  * Bug fix for partial updates during view builds.
  * Move query server to a design-doc based protocol.
+ * Major refactoring of couchjs to lay the groundwork for disabling cURL
+   support. The new HTTP interaction acts like a synchronous XHR. Example usage
+   of the new system is in the JavaScript CLI test runner.
 
 Replication
 
  * Added option to implicitly create replication target databases.
  * Avoid leaking file descriptors on automatic replication restarts.
+ * Added option to replicate a list of documents by id
 
 Storage System
 
@@ -44,7 +56,10 @@ Storage System
 
 Runtime Statistics
 
+ * Statistics are now calculated for a moving window instead of non-overlapping
+   timeframes. 
  * Fixed a problem with statistics timers and system sleep.
+ * Moved statistic names to a term file in the priv directory.
 
 Futon
 
