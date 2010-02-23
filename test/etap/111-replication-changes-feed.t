@@ -93,7 +93,7 @@ config_files() ->
 main(_) ->
     test_util:init_code_path(),
     
-    etap:plan(13),
+    etap:plan(1),
     case (catch test()) of
         ok ->
             etap:end_tests();
@@ -114,26 +114,32 @@ test() ->
     % couch_db:close(Db1),
     % couch_server:delete(<<"etap-test-db">>, []),
 
-    couch_server:delete(<<"etap-test-db">>, []),
-    {ok, Db2} = couch_db:create(<<"etap-test-db">>, []),
     test_all(remote),
-    test_remote_only(),
-    couch_db:close(Db2),
     couch_server:delete(<<"etap-test-db">>, []),
 
     ok.
 
 test_all(Type) ->
-    % test_unchanged_db(Type),
-    % test_simple_change(Type),
-    % test_since_parameter(Type),
-    % test_continuous_parameter(Type),
-    test_continuous_parameter_with_filter(Type).
-    % test_conflicts(Type),
-    % test_deleted_conflicts(Type).
+    % db_wrap(fun() -> test_unchanged_db(Type) end),
+    % db_wrap(fun() -> test_simple_change(Type) end),
+    % db_wrap(fun() -> test_since_parameter(Type) end),
+    db_wrap(fun() -> test_continuous_parameter(Type) end),
+    db_wrap(fun() -> 
+        test_continuous_parameter_with_filter(remote),
+        % timer:sleep(1000)
+        test_conflicts(Type)
+    end),
+    % db_wrap(fun() -> test_conflicts(Type) end),
+    % db_wrap(fun() -> test_deleted_conflicts(Type) end),
+    % db_wrap(fun() -> test_chunk_reassembly(remote) end),
+    ok.
 
-test_remote_only() ->
-    test_chunk_reassembly(remote).
+db_wrap(F) ->
+    couch_server:delete(<<"etap-test-db">>, []),
+    {ok, Db} = couch_db:create(<<"etap-test-db">>, []),
+    F(),
+    couch_db:close(Db),
+    couch_server:delete(<<"etap-test-db">>, []).
 
 test_unchanged_db(Type) ->
     {ok, Pid} = start_changes_feed(Type, 0, false),
@@ -185,15 +191,14 @@ test_continuous_parameter(Type) ->
 
     ok = couch_rep_changes_feed:stop(Pid).
 
-test_continuous_parameter_with_filter(Type) ->
-    generate_change(<<"_design/test">>, {[
+test_continuous_parameter_with_filter(Type) when Type =:= remote ->
+    generate_change(<<"_design/filter">>, {[
         {<<"filters">>, {[
             {<<"test">>,<<"function(doc) {return doc.type && doc.type == \"show\";}">>}
+            % {<<"test">>,<<"function(doc, req) {return req && req.query && req.query.type && doc[req.query.type] && doc[req.query.type] == \"show\";}">>}
         ]}}
     ]}),
-    {ok, Pid} = start_changes_feed(Type, get_update_seq(), true, "test/test",
-        [{<<"foo">>,<<"bar">>}]
-    ),
+    {ok, Pid} = start_changes_feed(Type, get_update_seq(), true, "filter/test"),
 
     % make the changes_feed request before the next update
     Self = self(),
@@ -202,7 +207,7 @@ test_continuous_parameter_with_filter(Type) ->
         Self ! {actual, Change}
     end),
 
-    Hide = generate_change(<<"hide">>, {[{<<"type">>, <<"hide">>}]}),
+    % Hide = generate_change(<<"hide">>, {[{<<"type">>, <<"hide">>}]}),
     Show = generate_change(<<"show">>, {[{<<"type">>, <<"show">>}]}),
     etap:is(
         receive {actual, Actual} -> Actual end,
@@ -212,7 +217,6 @@ test_continuous_parameter_with_filter(Type) ->
             [Type])
     ),
     ok = couch_rep_changes_feed:stop(Pid).
-
 
 test_conflicts(Type) ->
     Since = get_update_seq(),
@@ -292,7 +296,7 @@ generate_change(Id, EJson) ->
 generate_conflict() ->
     Id = couch_uuids:random(),
     Db = get_db(),
-    Doc1 = (couch_doc:from_json_obj({[<<"foo">>, <<"bar">>]}))#doc{id = Id},
+    Doc1 = (couch_doc:from_json_obj({[<<"foo">>, <<"baa">>]}))#doc{id = Id},
     Doc2 = (couch_doc:from_json_obj({[<<"foo">>, <<"baz">>]}))#doc{id = Id},
     {ok, Rev1} = couch_db:update_doc(Db, Doc1, [full_commit]),
     {ok, Rev2} = couch_db:update_doc(Db, Doc2, [full_commit, all_or_nothing]),
@@ -330,10 +334,11 @@ start_changes_feed(remote, Since, Continuous) ->
     Db = #http_db{url = get_dbname(remote)},
     couch_rep_changes_feed:start_link(self(), Db, Since, Props).
 
-start_changes_feed(local, Since, Continuous, Filter, Options) ->
-    Props = [{<<"continuous">>, Continuous},{<<"filter">>, Filter} | Options],
+start_changes_feed(local, Since, Continuous, Filter) ->
+    Props = [{<<"continuous">>, Continuous},{<<"filter">>, Filter},{<<"type">>,<<"type">>}],
     couch_rep_changes_feed:start_link(self(), get_db(), Since, Props);
-start_changes_feed(remote, Since, Continuous, Filter, Options) ->
-    Props = [{<<"continuous">>, Continuous},{<<"filter">>, Filter} | Options],
+start_changes_feed(remote, Since, Continuous, Filter) ->
+    Props = [{<<"continuous">>, Continuous},{<<"filter">>, Filter},{<<"type">>,<<"type">>}],
     Db = #http_db{url = get_dbname(remote)},
     couch_rep_changes_feed:start_link(self(), Db, Since, Props).
+

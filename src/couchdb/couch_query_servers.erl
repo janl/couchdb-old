@@ -183,10 +183,15 @@ json_doc(Doc) ->
     couch_doc:to_json_obj(Doc, [revs]).
 
 filter_docs(Req, Db, DDoc, FName, Docs) ->
+    io:format("~pDocs: '~p'~n", [self(), Docs]),
     JsonReq = couch_httpd_external:json_req_obj(Req, Db),
+    io:format("~p JsonReq: '~p'~n", [self(), JsonReq]),
     JsonDocs = [couch_doc:to_json_obj(Doc, [revs]) || Doc <- Docs],
+    io:format("~p JsonDocs: '~p'~n", [self(), JsonDocs]),
     JsonCtx = couch_util:json_user_ctx(Db),
+    io:format("~p JsonCtx: '~p'~n", [self(), JsonCtx]),
     [true, Passes] = ddoc_prompt(DDoc, [<<"filters">>, FName], [JsonDocs, JsonReq, JsonCtx]),
+    io:format("~p Passes: '~p'~n", [self(), Passes]),
     {ok, Passes}.
 
 ddoc_proc_prompt({Proc, DDocId}, FunPath, Args) -> 

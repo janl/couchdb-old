@@ -56,15 +56,31 @@ init([_Parent, #http_db{}=Source, Since, PostProps] = Args) ->
     end,
 
     Filter = case proplists:get_value(<<"filter">>, PostProps, false) of
-    false -> [];
-    Filter1 -> [{filter, ?l2b(Filter1)}]
+    false ->
+        [];
+    Filter1 ->
+        [{filter, list_to_atom(Filter1)}]
     end,
+
+    Props = proplists:delete(<<"continuous">>,
+        proplists:delete(<<"filter">>, PostProps)),
+
+    Qs = lists:append([
+        [
+            {style, all_docs},
+            {heartbeat, 10000},
+            {since, Since},
+            {feed, Feed}
+        ]
+        % Props,
+        ,Filter]),
+         % ]),
+    io:format("~p Qs: '~p'~n", [self(), Qs]),
 
     Pid = couch_rep_httpc:spawn_link_worker_process(Source),
     Req = Source#http_db{
         resource = "_changes",
-        qs = [{style, all_docs}, {heartbeat, 10000}, {since, Since},
-            {feed, Feed}|Filter],
+        qs = Qs,
         conn = Pid,
         options = [{stream_to, {self(), once}}, {response_format, binary},
             {inactivity_timeout, 31000}], % miss 3 heartbeats, assume death
