@@ -52,6 +52,10 @@ describe 'CouchDB instance'
         e.error.should.eql "file_exists"
       }
     end
+    
+    it 'should have the seq_num 0'
+      // TBD
+    end
   end
    
   describe '.deleteDb'
@@ -168,6 +172,7 @@ describe 'CouchDB instance'
         var deleted_doc = JSON.parse(responseText);
         deleted_doc._rev.should.eql delete_response.rev
         deleted_doc._id.should.eql delete_response.id
+        deleted_doc._deleted.should.be_true
       end
     
       it 'should return ok true, the ID and the revision of the deleted document'

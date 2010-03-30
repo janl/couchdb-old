@@ -58,6 +58,7 @@ describe 'jQuery couchdb'
           resp.should.include "temp_spec_db"
         }
       });
+      // note to self: why drop and not deleteDb like in couch.js?
       temp_db.drop();
     end
     

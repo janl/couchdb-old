@@ -145,6 +145,7 @@ describe 'CouchDB instance'
     end
    
     it 'should throw an error when the property doesnt exist'
+      // what does - here mean?
       -{ db.getDbProperty("_doesnt_exist")}.should.throw_error
     end
   end 
